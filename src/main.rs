@@ -1,6 +1,7 @@
 mod http_server;
 mod market;
 mod mcp_server;
+mod prompts;
 mod smc;
 mod tenzro;
 mod types;
@@ -24,7 +25,11 @@ async fn main() -> anyhow::Result<()> {
 
     let args: Vec<String> = std::env::args().collect();
     let http_port = args.windows(2).find_map(|w| {
-        if w[0] == "--http" { w[1].parse::<u16>().ok() } else { None }
+        if w[0] == "--http" {
+            w[1].parse::<u16>().ok()
+        } else {
+            None
+        }
     });
 
     if let Some(port) = http_port {
@@ -39,7 +44,11 @@ async fn main() -> anyhow::Result<()> {
 
 fn log_startup(cfg: &AgentConfig) {
     let masked_key = if cfg.tenzro_api_key.len() > 8 {
-        format!("{}***{}", &cfg.tenzro_api_key[..6], &cfg.tenzro_api_key[cfg.tenzro_api_key.len()-4..])
+        format!(
+            "{}***{}",
+            &cfg.tenzro_api_key[..6],
+            &cfg.tenzro_api_key[cfg.tenzro_api_key.len() - 4..]
+        )
     } else if cfg.tenzro_api_key.is_empty() {
         "(not set — AI suggestions disabled)".to_string()
     } else {

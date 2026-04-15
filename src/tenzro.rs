@@ -1,6 +1,6 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use reqwest::Client;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::time::Instant;
 
 /// Client for Tenzro Cloud AI inference.
@@ -36,7 +36,15 @@ impl TenzroClient {
     }
 
     pub async fn suggest(&self, market_context: &str) -> Result<String> {
-        let prompt = format!("{SYSTEM_PROMPT}\n\n{market_context}");
+        let system_prompt = match crate::prompts::load_system_prompt().await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed loading system prompt; using built-in fallback");
+                include_str!("../prompts/system_prompt.md").to_string()
+            }
+        };
+
+        let prompt = format!("{}\n\n{}", system_prompt, market_context);
 
         let mut body = json!({
             "provider":    self.provider,
@@ -79,11 +87,11 @@ impl TenzroClient {
 
         // Log usage metadata from Tenzro response
         let data = &json["data"];
-        let input_tokens  = data["inputTokens"].as_u64().unwrap_or(0);
+        let input_tokens = data["inputTokens"].as_u64().unwrap_or(0);
         let output_tokens = data["outputTokens"].as_u64().unwrap_or(0);
-        let cost_micro    = data["estimatedCostMicrodollars"].as_u64().unwrap_or(0);
-        let tenzro_ms     = data["latencyMs"].as_u64().unwrap_or(0);
-        let inference_id  = data["inferenceId"].as_str().unwrap_or("-");
+        let cost_micro = data["estimatedCostMicrodollars"].as_u64().unwrap_or(0);
+        let tenzro_ms = data["latencyMs"].as_u64().unwrap_or(0);
+        let inference_id = data["inferenceId"].as_str().unwrap_or("-");
 
         tracing::info!(
             inference_id,
@@ -97,7 +105,8 @@ impl TenzroClient {
         );
 
         // Extract text — Tenzro shape: data.responseText
-        let content = data["responseText"].as_str()
+        let content = data["responseText"]
+            .as_str()
             .or_else(|| data["responseData"]["text"].as_str())
             .or_else(|| json["result"].as_str())
             .or_else(|| json["text"].as_str())
@@ -108,14 +117,3 @@ impl TenzroClient {
         Ok(content.to_string())
     }
 }
-
-const SYSTEM_PROMPT: &str = "\
-You are an expert cryptocurrency derivatives trader specializing in Smart Money Concepts (SMC) \
-and institutional order flow analysis on Hyperliquid perpetuals. \
-Given market data, produce a concise, actionable trading brief with:
-1. Directional bias (Bullish / Bearish / Neutral)
-2. Suggested entry zone with reason
-3. Stop-loss level (below OB / above OB / swing point)
-4. Take-profit targets (TP1 near FVG fill, TP2 at next liquidity)
-5. Key risk factors to watch
-Be specific about price levels. Do not hedge excessively. Think like an institution.";
