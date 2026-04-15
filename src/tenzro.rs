@@ -10,7 +10,7 @@ pub struct TenzroClient {
     api_key: String,
     base_url: String,
     model: String,
-    project_id: String,
+    endpoint_id: String,
     provider: String,
 }
 
@@ -19,7 +19,7 @@ impl TenzroClient {
         api_key: String,
         base_url: String,
         model: String,
-        project_id: String,
+        endpoint_id: String,
         provider: String,
     ) -> Self {
         Self {
@@ -30,7 +30,7 @@ impl TenzroClient {
             api_key,
             base_url,
             model,
-            project_id,
+            endpoint_id,
             provider,
         }
     }
@@ -54,8 +54,8 @@ impl TenzroClient {
             "max_tokens":  600
         });
 
-        if !self.project_id.is_empty() {
-            body["projectId"] = json!(self.project_id);
+        if !self.endpoint_id.is_empty() {
+            body["endpointId"] = json!(self.endpoint_id);
         }
 
         tracing::debug!(

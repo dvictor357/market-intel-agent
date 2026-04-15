@@ -9,8 +9,8 @@ pub struct AgentConfig {
     pub tenzro_api_key: String,
     pub tenzro_base_url: String,
     pub tenzro_model: String,
-    /// Tenzro resource/project ID (shown as "Resource ID" in the dashboard)
-    pub tenzro_project_id: String,
+    /// Tenzro inference endpoint UUID (from dashboard → Inference tab)
+    pub tenzro_endpoint_id: String,
     /// AI provider: "anthropic" | "google" | "openai"
     pub tenzro_provider: String,
 }
@@ -24,7 +24,7 @@ impl Default for AgentConfig {
             tenzro_base_url: "https://api.cloud.tenzro.com/cloud/ai".to_string(),
             tenzro_model: std::env::var("TENZRO_MODEL")
                 .unwrap_or_else(|_| "claude-sonnet-4-6".to_string()),
-            tenzro_project_id: std::env::var("TENZRO_PROJECT_ID").unwrap_or_default(),
+            tenzro_endpoint_id: std::env::var("TENZRO_ENDPOINT_ID").unwrap_or_default(),
             tenzro_provider: std::env::var("TENZRO_PROVIDER")
                 .unwrap_or_else(|_| "anthropic".to_string()),
         }

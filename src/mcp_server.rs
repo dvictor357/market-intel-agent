@@ -37,7 +37,7 @@ impl McpServer {
                 config.tenzro_api_key.clone(),
                 config.tenzro_base_url.clone(),
                 config.tenzro_model.clone(),
-                config.tenzro_project_id.clone(),
+                config.tenzro_endpoint_id.clone(),
                 config.tenzro_provider.clone(),
             ))
         };
