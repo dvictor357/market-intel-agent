@@ -14,10 +14,11 @@ use crate::{
     market::HyperliquidClient,
     smc::SmcEngine,
     tenzro::TenzroClient,
-    types::{AgentConfig, Bias, MarketAnalysis, SmcSignal},
+    types::{AgentConfig, Bias, MarketAnalysis, SignalKind, SmcSignal},
 };
 use anyhow::Result;
 use serde_json::{json, Value};
+use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 pub struct McpServer {
@@ -177,30 +178,53 @@ impl McpServer {
         let pair     = args["pair"].as_str().unwrap_or("BTC").to_uppercase();
         let interval = args["interval"].as_str().unwrap_or("1h");
         let limit    = args["limit"].as_u64().unwrap_or(100) as usize;
+        let t_total  = Instant::now();
 
-        tracing::info!("analyze_pair {pair} {interval} limit={limit}");
+        tracing::info!(pair = %pair, interval, candles = limit, "analyze_pair started");
 
+        // ── Fetch market data
+        let t = Instant::now();
         let candles = self.market.get_candles(&pair, interval, limit).await?;
         let price   = self.market.get_price(&pair).await
             .unwrap_or_else(|_| candles.last().map(|c| c.close).unwrap_or(0.0));
         let funding = self.market.get_funding_rate(&pair).await.ok().flatten();
+        tracing::debug!(
+            candles_fetched = candles.len(),
+            price,
+            funding_rate = funding.as_ref().map(|f| f.rate).unwrap_or(0.0),
+            elapsed_ms = t.elapsed().as_millis(),
+            "hyperliquid fetch done"
+        );
 
+        // ── SMC analysis
+        let t = Instant::now();
         let signals = self.smc.analyze(&candles);
         let bias    = self.smc.overall_bias(&candles, &signals);
+        log_signal_summary(&pair, &signals, t.elapsed().as_millis());
 
-        // Build compact context for Tenzro AI
+        // ── Tenzro AI
         let ai_suggestion = if let Some(tenzro) = &self.tenzro {
             let ctx = build_ai_context(&pair, interval, price, &bias, &funding, &signals);
             match tenzro.suggest(&ctx).await {
-                Ok(s) => Some(s),
+                Ok(s)  => Some(s),
                 Err(e) => {
-                    tracing::warn!("Tenzro error: {e}");
+                    tracing::warn!(error = %e, "Tenzro suggestion failed");
                     Some(format!("AI unavailable: {e}"))
                 }
             }
         } else {
             None
         };
+
+        tracing::info!(
+            pair = %pair,
+            bias = %bias,
+            price,
+            signals = signals.len(),
+            ai = ai_suggestion.is_some(),
+            total_ms = t_total.elapsed().as_millis(),
+            "analyze_pair done"
+        );
 
         let analysis = MarketAnalysis {
             pair,
@@ -221,8 +245,9 @@ impl McpServer {
     async fn tool_whale_activity(&self, args: &Value) -> Result<String> {
         let pair    = args["pair"].as_str().unwrap_or("BTC").to_uppercase();
         let min_usd = args["min_usd"].as_f64().unwrap_or(100_000.0);
+        let t = Instant::now();
 
-        tracing::info!("get_whale_activity {pair} min_usd={min_usd}");
+        tracing::info!(pair = %pair, min_usd, "get_whale_activity started");
 
         let whales = self.market.get_whale_trades(&pair, min_usd).await?;
 
@@ -245,6 +270,16 @@ impl McpServer {
             "Neutral — mixed whale activity"
         };
 
+        tracing::info!(
+            pair = %pair,
+            whale_trades = whales.len(),
+            buy_usd  = format!("${:.0}", buy_vol),
+            sell_usd = format!("${:.0}", sell_vol),
+            bias,
+            elapsed_ms = t.elapsed().as_millis(),
+            "get_whale_activity done"
+        );
+
         let result = json!({
             "pair": pair,
             "threshold_usd": min_usd,
@@ -264,7 +299,7 @@ impl McpServer {
     async fn tool_funding_rate(&self, args: &Value) -> Result<String> {
         let pair = args["pair"].as_str().unwrap_or("BTC").to_uppercase();
 
-        tracing::info!("get_funding_rate {pair}");
+        tracing::info!(pair = %pair, "get_funding_rate started");
 
         let Some(f) = self.market.get_funding_rate(&pair).await? else {
             return Ok(format!("Funding rate not available for {pair}"));
@@ -389,6 +424,25 @@ fn build_ai_context(
          Top SMC Signals:\n{top_signals}\n\n\
          Provide specific entry zone, SL, TP1, TP2, and risk note."
     )
+}
+
+fn log_signal_summary(pair: &str, signals: &[SmcSignal], elapsed_ms: u128) {
+    let ob   = signals.iter().filter(|s| s.kind == SignalKind::OrderBlock).count();
+    let fvg  = signals.iter().filter(|s| s.kind == SignalKind::FairValueGap).count();
+    let bos  = signals.iter().filter(|s| s.kind == SignalKind::BreakOfStructure).count();
+    let chch = signals.iter().filter(|s| s.kind == SignalKind::ChangeOfCharacter).count();
+    let liq  = signals.iter().filter(|s| s.kind == SignalKind::LiquidityZone).count();
+    let flow = signals.iter().filter(|s| {
+        s.kind == SignalKind::SmartMoneyAccumulation || s.kind == SignalKind::SmartMoneyDistribution
+    }).count();
+
+    tracing::info!(
+        pair,
+        total   = signals.len(),
+        ob, fvg, bos, choch = chch, liquidity = liq, smart_flow = flow,
+        elapsed_ms,
+        "smc analysis done"
+    );
 }
 
 // ── Static tool schema (MCP tools/list response) ──────────────────────────────
